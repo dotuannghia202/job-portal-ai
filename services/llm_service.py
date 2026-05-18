@@ -2,6 +2,7 @@ import os
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -17,30 +18,37 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def generate_job_description(
     title: str,
     skills: str,
-    location: str,
-    experience: str
+    levels: str,
+    company_culture: str
 ) -> str:
     try:
         prompt = f"""
-Bạn là một Chuyên viên Nhân sự cấp cao.
-Hãy viết một bản mô tả công việc chuyên nghiệp.
-
-Thông tin đầu vào:
-- Vị trí: {title}
-- Kỹ năng yêu cầu: {skills}
-- Địa điểm làm việc: {location}
-- Yêu cầu kinh nghiệm: {experience}
-
-Yêu cầu:
-- Viết bằng tiếng Việt
-- Giọng văn chuyên nghiệp
-- Chỉ dùng gạch đầu dòng "-"
-- Không dùng markdown phức tạp
-"""
+        Bạn là một Chuyên gia Tuyển dụng. Hãy viết nội dung tin tuyển dụng thật chuyên nghiệp và thu hút.
+        Thông tin đầu vào:
+        - Vị trí: {title}
+        - Cấp bậc: {levels}
+        - Kỹ năng yêu cầu: {skills}
+        - Văn hóa công ty: {company_culture}
+        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không thêm markdown, không thêm text thừa):
+        {{
+            "description": "Viết 1 đoạn văn 3-4 câu giới thiệu về công việc và sự thú vị của nó...",
+            "requirements": [
+                "Yêu cầu 1...",
+                "Yêu cầu 2..."
+            ],
+            "benefits": [
+                "Quyền lợi 1...",
+                "Quyền lợi 2..."
+            ]
+        }}
+        """
 
         response = client.models.generate_content(
             model=GEMINI_MODEL,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
         )
 
         if not response.text:

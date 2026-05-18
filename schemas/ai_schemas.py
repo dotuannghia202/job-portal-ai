@@ -31,8 +31,8 @@ class MatchData(BaseModel):
 class GenerateJdRequest(BaseModel):
     title: str        # Tên công việc (VD: Senior Backend Java)
     skills: str       # Kỹ năng (VD: Spring Boot, PostgreSQL)
-    location: str     # Địa điểm (VD: Hà Nội)
-    experience: str   # Yêu cầu kinh nghiệm (VD: 2 năm)
+    levels: str  
+    company_culture: str  # Văn hóa công ty (VD: Đổi mới, Hợp tác)
 
 class GenerateJdData(BaseModel):
-    generated_jd: str # Bài văn JD do AI sinh ra
+    generated_jd: dict
