@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
-from routers import cv_router
+from routers import cv_router, jd_router, match_router
 
 # Khởi tạo ứng dụng FastAPI
 app = FastAPI(
@@ -63,6 +63,8 @@ class HelloResponse(BaseModel):
 # GẮN ROUTER
 # ================================================================
 app.include_router(cv_router.router)
+app.include_router(match_router.router)
+app.include_router(jd_router.router)
 
 # Viết API GET cơ bản (Giống @GetMapping)
 @app.get("/", response_model=HelloResponse)
