@@ -18,8 +18,8 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def generate_job_description(
     title: str,
     skills: str,
-    levels: str,
-    company_culture: str
+    levels: str
+    
 ) -> str:
     try:
         prompt = f"""
@@ -28,7 +28,6 @@ def generate_job_description(
         - Vị trí: {title}
         - Cấp bậc: {levels}
         - Kỹ năng yêu cầu: {skills}
-        - Văn hóa công ty: {company_culture}
         BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không thêm markdown, không thêm text thừa):
         {{
             "description": "Viết 1 đoạn văn 3-4 câu giới thiệu về công việc và sự thú vị của nó...",

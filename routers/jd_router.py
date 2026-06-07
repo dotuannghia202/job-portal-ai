@@ -13,7 +13,7 @@ async def generate_jd(request: GenerateJdRequest):
         raw_text = generate_job_description(
             request.title, 
             request.skills, 
-            request.company_culture, 
+            
             request.levels
         )
         
