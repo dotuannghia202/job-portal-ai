@@ -17,7 +17,7 @@ async def generate_jd(request: GenerateJdRequest):
             request.levels
         )
         
-        # 2. 🚨 ÉP CHUỖI ĐÓ THÀNH ĐỐI TƯỢNG JSON THẬT
+        # 2. ÉP CHUỖI ĐÓ THÀNH ĐỐI TƯỢNG JSON THẬT
         try:
             parsed_json = json.loads(raw_text)
         except json.JSONDecodeError:
