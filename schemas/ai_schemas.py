@@ -26,6 +26,8 @@ class MatchRequest(BaseModel):
 
 class MatchData(BaseModel):
     match_score: float
+    matched_skills: list[str] = []
+    missing_skills: list[str] = []
 
 # --- DTO CHO CHỨC NĂNG GEN JD ---
 class GenerateJdRequest(BaseModel):

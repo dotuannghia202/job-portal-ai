@@ -3,6 +3,7 @@ import re
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+import json
 
 load_dotenv()
 
@@ -59,7 +60,58 @@ def generate_job_description(
         raise Exception(f"Error when calling Google Gemini API: {str(e)}")
 
 
-def calculate_match_score_by_gemini(job_text: str, cv_text: str) -> float:
+def calculate_match_score_by_gemini(job_text: str, cv_text: str) -> dict:
+    try:
+        if not job_text or not cv_text:
+            return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+
+        prompt = f"""
+        Bạn là một Giám đốc nhân sự (HR) khắt khe và là một chuyên gia phân tích dữ liệu.
+        Nhiệm vụ của bạn là so sánh CV của ứng viên với Yêu cầu công việc (JD).
+
+        Quy tắc phân tích:
+        1. match_score: Chấm điểm phù hợp từ 0 đến 100.
+        2. matched_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD VÀ ỨNG VIÊN CÓ TRONG CV.
+        3. missing_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD NHƯNG ỨNG VIÊN KHÔNG CÓ TRONG CV.
+        4. Chấp nhận đa ngôn ngữ. Viết hoa chữ cái đầu của kỹ năng cho đẹp (VD: Java, Spring Boot, ReactJS).
+
+        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không markdown, không text thừa):
+        {{
+            "match_score": 85.5,
+            "matched_skills": ["Java", "Spring Boot", "PostgreSQL"],
+            "missing_skills": ["AWS", "Kubernetes"]
+        }}
+
+        --- MÔ TẢ CÔNG VIỆC (JD) ---
+        {job_text}
+
+        --- NỘI DUNG CV ---
+        {cv_text}
+        """
+
+        # Bật chế độ ép JSON (Giống hàm sinh JD)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+        )
+
+        if not response.text:
+            return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+
+        # Parse chuỗi JSON do AI trả về thành Dictionary
+        parsed_json = json.loads(response.text.strip())
+        
+        # Đảm bảo điểm số không bị lố
+        parsed_json["match_score"] = max(0.0, min(100.0, float(parsed_json.get("match_score", 0.0))))
+        
+        return parsed_json
+
+    except Exception as e:
+        print(f">>> [Lỗi] Khi chấm điểm bằng Gemini: {str(e)}")
+        return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
     try:
         # 1. Kiểm tra dữ liệu rỗng (Tiết kiệm tiền gọi API)
         if not job_text or not cv_text:
