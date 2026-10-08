@@ -37,3 +37,8 @@ class GenerateJdRequest(BaseModel):
 
 class GenerateJdData(BaseModel):
     generated_jd: dict
+
+# --- DTO CHO CHỨC NĂNG GEN CÂU HỎI PHỎNG VẤN ---
+class GenerateInterviewQuestionRequest(BaseModel):
+    job_text: str
+    cv_text: str = ""

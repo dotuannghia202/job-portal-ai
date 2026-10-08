@@ -1,0 +1,482 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: venv/**, .venv/**, env/**, **/__pycache__/**, *.pyc, .env, .pytest_cache/**, .idea/**, .vscode/**
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+routers/
+  cv_router.py
+  jd_router.py
+  match_router.py
+schemas/
+  ai_schemas.py
+services/
+  llm_service.py
+  pdf_service.py
+.gitignore
+main.py
+requirements.txt
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="routers/cv_router.py">
+from fastapi import APIRouter, HTTPException
+from schemas.ai_schemas import ExtractCvRequest, ExtractCvResponse, RestResponse
+from services.pdf_service import extract_text_from_pdf_url
+
+router = APIRouter(prefix="/api/v1/ai", tags=["CV Processing"])
+
+# Chú ý: response_model bây giờ là RestResponse bọc lấy ExtractCvResponse
+@router.post("/extract-cv", response_model=RestResponse[ExtractCvResponse])
+async def extract_cv(request: ExtractCvRequest):
+    try:
+        # Gọi Service xử lý
+        text = extract_text_from_pdf_url(request.file_url)
+        
+        # Đóng gói data
+        data_obj = ExtractCvResponse(parsed_text=text)
+        
+        # Trả về thành công
+        return RestResponse(
+            status_code=200,
+            message="Text extracted from CV successfully!",
+            data=data_obj,
+            error=None
+        )
+        
+    except Exception as e:
+        # Ném lỗi ra, file main.py sẽ tự chộp lấy và bọc thành JSON lỗi
+        raise HTTPException(status_code=400, detail=str(e))
+</file>
+
+<file path="services/pdf_service.py">
+import pdfplumber
+import requests
+import io
+
+def extract_text_from_pdf_url(pdf_url: str) -> str:
+    try:
+        # 1. Tải file PDF từ Link Cloudinary về
+        response = requests.get(pdf_url)
+        response.raise_for_status() # Báo lỗi nếu link hỏng (404, 403)
+
+        # 2. Đưa file vào bộ nhớ RAM thay vì lưu xuống ổ cứng
+        pdf_bytes = io.BytesIO(response.content)
+
+        full_text = ""
+
+        # 3. Mở và đọc PDF bằng pdfplumber
+        with pdfplumber.open(pdf_bytes) as pdf:
+            # Lặp qua từng trang của CV
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text + "\n"
+
+        # 4. Trả về chuỗi văn bản đã được làm sạch khoảng trắng
+        return full_text.strip()
+
+    except Exception as e:
+        raise Exception(f"Error when extracting PDF: {str(e)}")
+</file>
+
+<file path=".gitignore">
+.env
+venv/
+__pycache__/
+*.py[cod]
+</file>
+
+<file path="main.py">
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from pydantic import BaseModel
+
+from routers import cv_router, jd_router, match_router
+
+# Khởi tạo ứng dụng FastAPI
+app = FastAPI(
+    title="Job Portal AI Microservice",
+    description="Hệ thống AI xử lý CV và JD",
+    version="1.0.0"
+)
+
+# GLOBAL EXCEPTION HANDLERS (Giống hệt @RestControllerAdvice)
+# ================================================================
+
+# 1. Bắt lỗi HTTP do mình chủ động ném ra (VD: raise HTTPException)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status_code": exc.status_code,
+            "message": "Xử lý thất bại!",
+            "data": None,
+            "error": exc.detail # Bỏ lỗi vào trường error
+        }
+    )
+
+# 2. Bắt lỗi Validation (Khi gửi sai định dạng JSON)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status_code": 400,
+            "message": "Dữ liệu đầu vào không hợp lệ",
+            "data": None,
+            "error": str(exc.errors())
+        }
+    )
+
+# 3. Bắt mọi lỗi Exception chung chung (Lỗi 500 sập Server)
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status_code": 500,
+            "message": "Lỗi hệ thống nội bộ Server",
+            "data": None,
+            "error": str(exc)
+        }
+    )
+
+# Tạo một DTO đơn giản (Trong Python dùng Pydantic)
+class HelloResponse(BaseModel):
+    message: str
+    status: int
+
+# GẮN ROUTER
+# ================================================================
+app.include_router(cv_router.router)
+app.include_router(match_router.router)
+app.include_router(jd_router.router)
+
+# Viết API GET cơ bản (Giống @GetMapping)
+@app.get("/", response_model=HelloResponse)
+async def root():
+    return {"status_code": 200, 
+        "message": "Python AI Server đang chạy!", 
+        "data": None, 
+        "error": None}
+</file>
+
+<file path="requirements.txt">
+fastapi
+uvicorn
+pydantic
+python-dotenv
+requests
+pdfplumber
+google-genai
+</file>
+
+<file path="routers/match_router.py">
+from fastapi import APIRouter, HTTPException
+from schemas.ai_schemas import MatchRequest, MatchData, RestResponse
+from services.llm_service import calculate_match_score_by_gemini
+
+router = APIRouter(prefix="/api/v1/ai", tags=["AI Matching"])
+
+@router.post("/match", response_model=RestResponse[MatchData])
+async def match_cv_job(request: MatchRequest):
+    try:
+        result_dict = calculate_match_score_by_gemini(request.job_text, request.cv_text)
+        data_obj = MatchData(**result_dict)
+        return RestResponse(
+            status_code=200,
+            message="Phân tích CV bằng Gemini AI thành công!",
+            data=data_obj,
+            error=None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+</file>
+
+<file path="routers/jd_router.py">
+import json
+
+from fastapi import APIRouter, HTTPException
+from schemas.ai_schemas import GenerateJdRequest, GenerateJdData, RestResponse
+from services.llm_service import generate_job_description
+
+router = APIRouter(prefix="/api/v1/ai", tags=["JD Generation"])
+
+@router.post("/generate-jd", response_model=RestResponse[GenerateJdData])
+async def generate_jd(request: GenerateJdRequest):
+    try:
+        # 1. Lấy chuỗi văn bản từ Gemini (Đang chứa \n và \")
+        raw_text = generate_job_description(
+            request.title, 
+            request.skills, 
+            
+            request.levels
+        )
+        
+        # 2. ÉP CHUỖI ĐÓ THÀNH ĐỐI TƯỢNG JSON THẬT
+        try:
+            parsed_json = json.loads(raw_text)
+        except json.JSONDecodeError:
+            # Đề phòng AI dở chứng trả về văn bản linh tinh không phải JSON
+            raise Exception("AI không trả về đúng định dạng JSON!")
+
+        # 3. Gắn vào DTO (Bây giờ nó là 1 object xịn sò)
+        data_obj = GenerateJdData(generated_jd=parsed_json)
+        
+        return RestResponse(
+            status_code=200,
+            message="Sinh mô tả công việc bằng AI thành công!",
+            data=data_obj,
+            error=None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+</file>
+
+<file path="schemas/ai_schemas.py">
+from pydantic import BaseModel
+from typing import Generic, TypeVar, Optional
+
+# Khai báo chữ T (Generic Type) giống hệt Java
+T = TypeVar("T")
+
+# 1. CLASS BỌC RESPONSE CHUẨN MỰC
+class RestResponse(BaseModel, Generic[T]):
+    status_code: int
+    message: str
+    data: Optional[T] = None
+    error: Optional[str] = None
+
+# DTO Nhận dữ liệu từ Spring Boot gửi sang
+class ExtractCvRequest(BaseModel):
+    file_url: str
+
+# DTO Trả dữ liệu về cho Spring Boot
+class ExtractCvResponse(BaseModel):
+    parsed_text: str
+
+# --- DTO CHO CHỨC NĂNG MATCHING ---
+class MatchRequest(BaseModel):
+    job_text: str
+    cv_text: str
+
+class MatchData(BaseModel):
+    match_score: float
+    matched_skills: list[str] = []
+    missing_skills: list[str] = []
+
+# --- DTO CHO CHỨC NĂNG GEN JD ---
+class GenerateJdRequest(BaseModel):
+    title: str        # Tên công việc (VD: Senior Backend Java)
+    skills: str       # Kỹ năng (VD: Spring Boot, PostgreSQL)
+    levels: str
+
+class GenerateJdData(BaseModel):
+    generated_jd: dict
+</file>
+
+<file path="services/llm_service.py">
+import os
+import re
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+import json
+
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+if not GEMINI_API_KEY:
+    raise RuntimeError("Missing GEMINI_API_KEY in .env file")
+
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+
+def generate_job_description(
+    title: str,
+    skills: str,
+    levels: str
+    
+) -> str:
+    try:
+        prompt = f"""
+        Bạn là một Chuyên gia Tuyển dụng. Hãy viết nội dung tin tuyển dụng thật chuyên nghiệp và thu hút.
+        Thông tin đầu vào:
+        - Vị trí: {title}
+        - Cấp bậc: {levels}
+        - Kỹ năng yêu cầu: {skills}
+        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không thêm markdown, không thêm text thừa):
+        {{
+            "description": "Viết 1 đoạn văn 3-4 câu giới thiệu về công việc và sự thú vị của nó...",
+            "requirements": [
+                "Yêu cầu 1...",
+                "Yêu cầu 2..."
+            ],
+            "benefits": [
+                "Quyền lợi 1...",
+                "Quyền lợi 2..."
+            ]
+        }}
+        """
+
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+        )
+
+        if not response.text:
+            raise Exception("Gemini returned empty response")
+
+        return response.text.strip()
+
+    except Exception as e:
+        raise Exception(f"Error when calling Google Gemini API: {str(e)}")
+
+
+def calculate_match_score_by_gemini(job_text: str, cv_text: str) -> dict:
+    try:
+        if not job_text or not cv_text:
+            return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+
+        prompt = f"""
+        Bạn là một Giám đốc nhân sự (HR) khắt khe và là một chuyên gia phân tích dữ liệu.
+        Nhiệm vụ của bạn là so sánh CV của ứng viên với Yêu cầu công việc (JD).
+
+        Quy tắc phân tích:
+        1. match_score: Chấm điểm phù hợp từ 0 đến 100.
+        2. matched_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD VÀ ỨNG VIÊN CÓ TRONG CV.
+        3. missing_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD NHƯNG ỨNG VIÊN KHÔNG CÓ TRONG CV.
+        4. Chấp nhận đa ngôn ngữ. Viết hoa chữ cái đầu của kỹ năng cho đẹp (VD: Java, Spring Boot, ReactJS).
+
+        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không markdown, không text thừa):
+        {{
+            "match_score": 85.5,
+            "matched_skills": ["Java", "Spring Boot", "PostgreSQL"],
+            "missing_skills": ["AWS", "Kubernetes"]
+        }}./
+
+        --- MÔ TẢ CÔNG VIỆC (JD) ---
+        {job_text}
+
+        --- NỘI DUNG CV ---
+        {cv_text}
+        """
+
+        # Bật chế độ ép JSON (Giống hàm sinh JD)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            )
+        )
+
+        if not response.text:
+            return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+
+        # Parse chuỗi JSON do AI trả về thành Dictionary
+        parsed_json = json.loads(response.text.strip())
+        
+        # Đảm bảo điểm số không bị lố
+        parsed_json["match_score"] = max(0.0, min(100.0, float(parsed_json.get("match_score", 0.0))))
+        
+        return parsed_json
+
+    except Exception as e:
+        print(f">>> [Lỗi] Khi chấm điểm bằng Gemini: {str(e)}")
+        return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+    try:
+        # 1. Kiểm tra dữ liệu rỗng (Tiết kiệm tiền gọi API)
+        if not job_text or not cv_text:
+            return 0.0
+
+        # 2. Xây dựng Prompt (Lời nhắc)
+        prompt = f"""
+        Bạn là một Giám đốc nhân sự (HR) khắt khe. Hãy chấm điểm mức độ phù hợp của CV ứng viên với Yêu cầu công việc (JD) dưới thang điểm 100.
+
+        Quy tắc chấm điểm (QUAN TRỌNG):
+        1. Đánh giá kỹ năng: Nếu CV có chứa ĐỦ các kỹ năng cốt lõi mà JD yêu cầu -> Điểm cao.
+        2. Dư thừa không trừ điểm: Việc CV có thêm nhiều kỹ năng khác hoặc dài dòng KHÔNG được làm giảm điểm số.
+        3. Đa ngôn ngữ: Chấp nhận JD Tiếng Việt và CV Tiếng Anh (hoặc ngược lại). Hãy hiểu ngữ nghĩa của chúng.
+        4. BẮT BUỘC CHỈ TRẢ VỀ DUY NHẤT 1 CON SỐ (từ 0 đến 100). Không giải thích, không thêm dấu chấm câu, không viết thêm bất kỳ chữ nào khác.
+
+        --- MÔ TẢ CÔNG VIỆC (JD) ---
+        {job_text}
+
+        --- NỘI DUNG CV ---
+        {cv_text}
+        """
+
+        # 3. Gọi Google Gemini
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
+
+        raw_text = response.text.strip()
+
+        # 4. Dùng Regex để an toàn lấy ra con số (Đề phòng AI trả lời: "Điểm: 85")
+        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", raw_text)
+
+        if numbers:
+            score = float(numbers[0])
+            # Ép điểm nằm trong khoảng an toàn 0 -> 100
+            return max(0.0, min(100.0, score))
+        else:
+            print(f">>> [Cảnh báo] Gemini không trả về số: {raw_text}")
+            return 0.0
+
+    except Exception as e:
+        print(f">>> [Lỗi] Khi chấm điểm bằng Gemini: {str(e)}")
+        return 0.0
+</file>
+
+</files>

@@ -1,11 +1,14 @@
+from schemas.interview_question import InterviewQuestionItem
+import json
 import os
-import re
+
 from dotenv import load_dotenv
+load_dotenv()
+
 from google import genai
 from google.genai import types
-import json
 
-load_dotenv()
+from services.vector_service import search_custom_questions
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
@@ -16,29 +19,30 @@ if not GEMINI_API_KEY:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
+# Generate Job Description
 def generate_job_description(
     title: str,
     skills: str,
     levels: str
-    
 ) -> str:
     try:
         prompt = f"""
-        Bạn là một Chuyên gia Tuyển dụng. Hãy viết nội dung tin tuyển dụng thật chuyên nghiệp và thu hút.
-        Thông tin đầu vào:
-        - Vị trí: {title}
-        - Cấp bậc: {levels}
-        - Kỹ năng yêu cầu: {skills}
-        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không thêm markdown, không thêm text thừa):
+        You are a professional Recruitment Specialist / HR Expert. Write a compelling and professional job description.
+        Input information:
+        - Job Title: {title}
+        - Level: {levels}
+        - Required Skills: {skills}
+
+        YOU MUST RETURN EXACTLY THE FOLLOWING JSON FORMAT (No markdown formatting, no code blocks, no extra text):
         {{
-            "description": "Viết 1 đoạn văn 3-4 câu giới thiệu về công việc và sự thú vị của nó...",
+            "description": "Write a 3-4 sentence engaging introduction about the job role and its impact...",
             "requirements": [
-                "Yêu cầu 1...",
-                "Yêu cầu 2..."
+                "Requirement 1...",
+                "Requirement 2..."
             ],
             "benefits": [
-                "Quyền lợi 1...",
-                "Quyền lợi 2..."
+                "Benefit 1...",
+                "Benefit 2..."
             ]
         }}
         """
@@ -60,36 +64,38 @@ def generate_job_description(
         raise Exception(f"Error when calling Google Gemini API: {str(e)}")
 
 
+# Calculate match score between JD and CV
 def calculate_match_score_by_gemini(job_text: str, cv_text: str) -> dict:
+
     try:
         if not job_text or not cv_text:
             return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
 
         prompt = f"""
-        Bạn là một Giám đốc nhân sự (HR) khắt khe và là một chuyên gia phân tích dữ liệu.
-        Nhiệm vụ của bạn là so sánh CV của ứng viên với Yêu cầu công việc (JD).
+        You are a strict HR Director and a data analysis expert.
+        Your task is to compare a candidate's CV with a Job Description (JD).
 
-        Quy tắc phân tích:
-        1. match_score: Chấm điểm phù hợp từ 0 đến 100.
-        2. matched_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD VÀ ỨNG VIÊN CÓ TRONG CV.
-        3. missing_skills: Trích xuất danh sách các kỹ năng cốt lõi CÓ YÊU CẦU TRONG JD NHƯNG ỨNG VIÊN KHÔNG CÓ TRONG CV.
-        4. Chấp nhận đa ngôn ngữ. Viết hoa chữ cái đầu của kỹ năng cho đẹp (VD: Java, Spring Boot, ReactJS).
+        Analysis Rules:
+        1. match_score: Score the overall match from 0 to 100.
+        2. matched_skills: Extract a list of core skills that ARE REQUIRED IN THE JD AND FOUND IN THE CV.
+        3. missing_skills: Extract a list of core skills that ARE REQUIRED IN THE JD BUT MISSING FROM THE CV.
+        4. Multilingual support: Support both Vietnamese and English. Capitalize skill names properly (e.g., Java, Spring Boot, ReactJS).
 
-        BẮT BUỘC TRẢ VỀ CHÍNH XÁC ĐỊNH DẠNG JSON SAU (Không markdown, không text thừa):
+        YOU MUST RETURN EXACTLY THE FOLLOWING JSON FORMAT (No markdown, no extra text):
         {{
             "match_score": 85.5,
             "matched_skills": ["Java", "Spring Boot", "PostgreSQL"],
             "missing_skills": ["AWS", "Kubernetes"]
         }}
 
-        --- MÔ TẢ CÔNG VIỆC (JD) ---
+        --- JOB DESCRIPTION (JD) ---
         {job_text}
 
-        --- NỘI DUNG CV ---
+        --- CV CONTENT ---
         {cv_text}
         """
 
-        # Bật chế độ ép JSON (Giống hàm sinh JD)
+        # Enable JSON response mode
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
@@ -101,58 +107,74 @@ def calculate_match_score_by_gemini(job_text: str, cv_text: str) -> dict:
         if not response.text:
             return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
 
-        # Parse chuỗi JSON do AI trả về thành Dictionary
+        # Parse JSON string returned by AI into a dictionary
         parsed_json = json.loads(response.text.strip())
         
-        # Đảm bảo điểm số không bị lố
+        # Ensure match_score is constrained within [0.0, 100.0]
         parsed_json["match_score"] = max(0.0, min(100.0, float(parsed_json.get("match_score", 0.0))))
         
         return parsed_json
 
     except Exception as e:
-        print(f">>> [Lỗi] Khi chấm điểm bằng Gemini: {str(e)}")
+        print(f">>> [Error] Scoring with Gemini: {str(e)}")
         return {"match_score": 0.0, "matched_skills": [], "missing_skills": []}
+
+
+# Generate interview questions
+def generate_interview_questions(job_text: str, cv_text: str) -> list:
     try:
-        # 1. Kiểm tra dữ liệu rỗng (Tiết kiệm tiền gọi API)
-        if not job_text or not cv_text:
-            return 0.0
+        # Search proprietary questions trong Vector DB
+        search_query = f"{job_text[:500]} {cv_text[:500]}"
+        custom_bank = search_custom_questions(search_query, n_results=2)
 
-        # 2. Xây dựng Prompt (Lời nhắc)
+        custom_context = ""
+        if custom_bank:
+            custom_context = (
+                "--- PROPRIETARY SAMPLE QUESTIONS (PRIORITIZE ADAPTING BASED"
+                " ON THESE) ---\n"
+            )
+            for item in custom_bank:
+                custom_context += (
+                    f"+ Sample question: {item['question']}\n  Evaluation"
+                    f" rubric: {item['rubric']}\n"
+                )
+
+        # Prompt chỉ định rõ vai trò của từng loại category để AI phân loại chính xác
         prompt = f"""
-        Bạn là một Giám đốc nhân sự (HR) khắt khe. Hãy chấm điểm mức độ phù hợp của CV ứng viên với Yêu cầu công việc (JD) dưới thang điểm 100.
+        You are an Engineering Manager. Based on the Job Description (JD), Candidate CV, and Sample Questions, generate exactly 5 interview questions.
 
-        Quy tắc chấm điểm (QUAN TRỌNG):
-        1. Đánh giá kỹ năng: Nếu CV có chứa ĐỦ các kỹ năng cốt lõi mà JD yêu cầu -> Điểm cao.
-        2. Dư thừa không trừ điểm: Việc CV có thêm nhiều kỹ năng khác hoặc dài dòng KHÔNG được làm giảm điểm số.
-        3. Đa ngôn ngữ: Chấp nhận JD Tiếng Việt và CV Tiếng Anh (hoặc ngược lại). Hãy hiểu ngữ nghĩa của chúng.
-        4. BẮT BUỘC CHỈ TRẢ VỀ DUY NHẤT 1 CON SỐ (từ 0 đến 100). Không giải thích, không thêm dấu chấm câu, không viết thêm bất kỳ chữ nào khác.
+        {custom_context}
 
-        --- MÔ TẢ CÔNG VIỆC (JD) ---
+        --- QUESTION CATEGORIES & DISTRIBUTION GUIDELINES:
+        Distribute the 5 questions across these exact categories:
+        1. PROJECT_DEEP_DIVE (1-2 questions): Deep dive into specific projects/architecture mentioned in CV (ask about trade-offs, their actual role, challenges).
+        2. TECHNICAL_CORE (1-2 questions): Core technical knowledge required strictly by the JD.
+        3. PROBLEM_SOLVING (1 question): System design, troubleshooting a bug, or resolving a performance bottleneck.
+        4. SITUATIONAL (1 question): Real-world workplace scenarios, tight deadlines, handling conflicts, or teamwork.
+
+        --- RULES:
+        - If "PROPRIETARY SAMPLE QUESTIONS" are provided, adapt and contextualize them into the candidate's CV experience.
+        - Questions must be concrete, practical, and directly address the candidate's stack. Avoid generic textbook trivia.
+
+        --- JD:
         {job_text}
 
-        --- NỘI DUNG CV ---
+        --- CV:
         {cv_text}
         """
 
-        # 3. Gọi Google Gemini
+        # Gọi Gemini với ràng buộc Schema
         response = client.models.generate_content(
             model=GEMINI_MODEL,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=list[InterviewQuestionItem],
+                temperature=0.3,
+            ),
         )
 
-        raw_text = response.text.strip()
-
-        # 4. Dùng Regex để an toàn lấy ra con số (Đề phòng AI trả lời: "Điểm: 85")
-        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", raw_text)
-
-        if numbers:
-            score = float(numbers[0])
-            # Ép điểm nằm trong khoảng an toàn 0 -> 100
-            return max(0.0, min(100.0, score))
-        else:
-            print(f">>> [Cảnh báo] Gemini không trả về số: {raw_text}")
-            return 0.0
+        return json.loads(response.text.strip())
 
     except Exception as e:
-        print(f">>> [Lỗi] Khi chấm điểm bằng Gemini: {str(e)}")
-        return 0.0
+        raise Exception(f"Error generating interview questions: {str(e)}")
